@@ -109,8 +109,8 @@ if __name__ == '__main__':
             batch[i], 
             reverse_dictionary[batch[i]], 
             '->', 
-            labels[i, 0], 
-            reverse_dictionary[labels[i, 0]])
+            labels[i], 
+            reverse_dictionary[labels[i]])
     
     # batch 的参数
     batch_size = 128
@@ -151,11 +151,12 @@ if __name__ == '__main__':
             biases = tf.Variable(tf.zeros([vocabulary_size]))
         
         with tf.name_scope('loss'):
+            labels_2dim = tf.reshape(train_labels, [-1, 1])
             loss = tf.reduce_mean(
                 tf.nn.nce_loss(
                     weights=weights,
                     biases=biases,
-                    labels=train_labels,
+                    labels=labels_2dim,
                     inputs=emb_vec,
                     num_sampled=num_sampled,
                     num_classes=vocabulary_size))
