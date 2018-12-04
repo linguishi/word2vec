@@ -12,8 +12,6 @@ import matplotlib.pyplot as plt
 from tensorflow.contrib.tensorboard.plugins import projector
 from sklearn.manifold import TSNE
 
-# 控制batch的生产
-data_index = 0
 
 def build_dataset(words, n_words):
     """
@@ -38,43 +36,43 @@ def build_dataset(words, n_words):
     return data, count, dictionary, reversed_dictionary
 
 
-def generate_batch(batch_size, num_skips, skip_window):
+def generate_batch(data, batch_size, num_skips, skip_window, start_index = 0):
     """
     Inputs:
+    - data # word 的数值表示
     - batch_size: 每个batch所含的样本数量
     - num_skips: 在一个window下（2 * skip_window + 1）产生context词的数量
     - skip_window window半边大小
     Returns a tuple of:
     - data_index: array，每个词的数值表示 shape(batch_size, )
     - labels: array，样本的标注，即某个context的数值表示 shape(batch_size, )
+    - next_index, 返回下次的index，应该从方法传入
     """
-    global data # word 的数值表示
-    global data_index
     assert batch_size % num_skips == 0 
     assert num_skips <= 2 * skip_window 
     batch = np.ndarray(shape=(batch_size), dtype=np.int32)
     labels = np.ndarray(shape=(batch_size), dtype=np.int32)
     span = 2 * skip_window + 1  # [ skip_window target skip_window ]
     buffer = collections.deque(maxlen=span)
-    if data_index + span > len(data):
-        data_index = 0
-    buffer.extend(data[data_index:data_index + span])
-    data_index += span
+    if start_index + span > len(data):
+        start_index = 0
+    buffer.extend(data[start_index:start_index + span])
+    start_index += span
     for i in range(batch_size // num_skips): #i 是每一次的窗口滑动
         context_words = [w for w in range(span) if w != skip_window]
         words_to_use = random.sample(context_words, num_skips)
         for j, context_word in enumerate(words_to_use):
             batch[i * num_skips + j] = buffer[skip_window]
             labels[i * num_skips + j] = buffer[context_word]
-        if data_index == len(data):
+        if start_index == len(data):
             buffer.extend(data[0:span])
-            data_index = span
+            start_index = span
         else:
-            buffer.append(data[data_index])
-            data_index += 1 #每次挪动一个词
+            buffer.append(data[start_index])
+            start_index += 1 #每次挪动一个词
     # 将data index 倒回一点点，使得整个数据采样比较均匀。
-    data_index = (data_index + len(data) - span) % len(data)
-    return batch, labels
+    next_index = (start_index + len(data) - span) % len(data)
+    return batch, labels, next_index
 
 # 打印低维词向量
 def plot_with_labels(low_dim_embs, labels, filename):
@@ -92,18 +90,45 @@ def plot_with_labels(low_dim_embs, labels, filename):
             va='bottom')
     plt.savefig(filename)
 
-if __name__ == '__main__':
-    with open('text8') as f:
-        data = tf.compat.as_str(f.read()).split()
-    # 词数
-    vocabulary_size = 50000
 
+flags = tf.app.flags
+flags.DEFINE_string('log_path', 'log', 'log path')
+flags.DEFINE_string('corpus_file', 'text8', 'corpus file only one line')
+flags.DEFINE_integer('voc_size', 50000, 'vocabulary size, others are ignored')
+flags.DEFINE_integer('batch_size', 128, 'batch size')
+flags.DEFINE_integer('embedding_size', 128, 'embedding_size')
+flags.DEFINE_integer('skip_window', 1, 'skip window size')
+flags.DEFINE_integer('neg_sample_num', 64, 'negative sample size')
+flags.DEFINE_float('learning_rate', 1.0, 'learning rate')
+flags.DEFINE_integer('train_steps', 100001, 'train steps')
+FLAGS = flags.FLAGS
+
+# 可调参数
+batch_size = FLAGS.batch_size
+embedding_size = FLAGS.embedding_size
+skip_window = FLAGS.skip_window
+num_sampled = FLAGS.neg_sample_num
+learning_rate = FLAGS.learning_rate
+
+
+num_skips = skip_window * 2
+train_steps = FLAGS.train_steps
+voc_size = FLAGS.voc_size
+log_path = FLAGS.log_path
+if not os.path.exists(log_path):
+    os.makedirs(log_path)
+
+def main(_):
+    with open(FLAGS.corpus_file) as f:
+        data = tf.compat.as_str(f.read()).split()
     data, count, dictionary, reverse_dictionary = build_dataset(
-        data, vocabulary_size)
+        data, voc_size)
     print('Most common words (+UNK)', count[:5])
     print('Sample data', data[:10], [reverse_dictionary[i] for i in data[:10]])
 
-    batch, labels = generate_batch(batch_size=8, num_skips=2, skip_window=1)
+    data_index = 0
+    batch, labels, data_index = generate_batch(
+        data, batch_size=8, num_skips=2, skip_window=1, start_index=data_index)
     for i in range(8):
         print(
             batch[i], 
@@ -111,19 +136,10 @@ if __name__ == '__main__':
             '->', 
             labels[i], 
             reverse_dictionary[labels[i]])
-    
-    # batch 的参数
-    batch_size = 128
-    embedding_size = 128  # Dimension of the embedding vector.
-    skip_window = 1  # How many words to consider left and right.
-    num_skips = 2  # How many times to reuse an input to generate a label.
-    num_sampled = 64  # Number of negative examples to sample.
-    learning_rate = 1.0
-    train_steps = 100001
 
     # 验证相关的参数
-    valid_size = 16  # Random set of words to evaluate similarity on.
-    valid_window = 100  # Only pick dev samples in the head of the distribution.
+    valid_size = 16  #每次随机取16个单词查看最近的词
+    valid_window = 100  
     valid_examples = np.random.choice(
         valid_window, valid_size, replace=False)
 
@@ -139,16 +155,16 @@ if __name__ == '__main__':
         with tf.name_scope('embeddings'):
             embeddings = tf.Variable(
                 tf.random_uniform(
-                    [vocabulary_size, embedding_size], -1.0, 1.0))
+                    [voc_size, embedding_size], -1.0, 1.0))
             emb_vec = tf.nn.embedding_lookup(embeddings, train_inputs)
         
         with tf.name_scope('weights'):
             weights = tf.Variable(tf.truncated_normal(
-                [vocabulary_size, embedding_size],
+                [voc_size, embedding_size],
                 stddev=0.001))
 
         with tf.name_scope('biases'):
-            biases = tf.Variable(tf.zeros([vocabulary_size]))
+            biases = tf.Variable(tf.zeros([voc_size]))
         
         with tf.name_scope('loss'):
             labels_2dim = tf.reshape(train_labels, [-1, 1])
@@ -159,7 +175,7 @@ if __name__ == '__main__':
                     labels=labels_2dim,
                     inputs=emb_vec,
                     num_sampled=num_sampled,
-                    num_classes=vocabulary_size))
+                    num_classes=voc_size))
 
         with tf.name_scope('similarity'):
             norm = tf.sqrt(tf.reduce_sum(tf.square(embeddings), 1, keepdims=True))
@@ -180,13 +196,13 @@ if __name__ == '__main__':
         saver = tf.train.Saver()
 
     with tf.Session(graph=graph) as sess:
-        writer = tf.summary.FileWriter('log', sess.graph)
+        writer = tf.summary.FileWriter(log_path, sess.graph)
         init.run()
         print 'Finish Variables Initialization...'
         avg_loss = 0
         for step in xrange(train_steps):
-            batch_inputs, batch_labels = generate_batch(
-                batch_size, num_skips, skip_window)
+            batch_inputs, batch_labels, data_index = generate_batch(
+                data, batch_size, num_skips, skip_window, start_index=data_index)
             feed_dict = {train_inputs: batch_inputs, train_labels: batch_labels}
             # 定义 metadata 变量， 记录训练运算时间和内存占用等信息。
             run_metadata = tf.RunMetadata()
@@ -218,18 +234,18 @@ if __name__ == '__main__':
         # 结束循环后求一个归一化的embeding
         final_ebds = sess.run(normed_ebds)
         # 保存词汇表，行号为他们在字典里的index
-        with open(os.path.join('log', 'metadata.tsv'), 'w') as f:
-            for i in xrange(vocabulary_size):
+        with open(os.path.join(log_path, 'metadata.tsv'), 'w') as f:
+            for i in xrange(voc_size):
                 f.write(reverse_dictionary[i] + '\n')
 
         #保存检查点
-        saver.save(sess, os.path.join('log', 'model.checkpoint'))
+        saver.save(sess, os.path.join(log_path, 'model.checkpoint'))
         
         #可视化 embeding
         config = projector.ProjectorConfig()
         embedding_conf = config.embeddings.add()
         embedding_conf.tensor_name = embeddings.name
-        embedding_conf.metadata_path = os.path.join('log', 'metadata.tsv')
+        embedding_conf.metadata_path = os.path.join(log_path, 'metadata.tsv')
         projector.visualize_embeddings(writer, config)
         writer.close()
 
@@ -238,4 +254,7 @@ if __name__ == '__main__':
         plot_only = 500
         low_dim_embs = tsne.fit_transform(final_ebds[:plot_only, :])
         labels = [reverse_dictionary[i] for i in xrange(plot_only)]
-        plot_with_labels(low_dim_embs, labels, os.path.join('tsne', 'tsne.png'))
+        plot_with_labels(low_dim_embs, labels, os.path.join(log_path, 'tsne.png'))
+
+if __name__ == '__main__':
+    tf.app.run()

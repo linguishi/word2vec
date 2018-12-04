@@ -2,4 +2,7 @@ text8
 text8.zip
 *.pyc
 .vscode
-log
+/log/*
+!/log/tsne.png
+/small_log/*
+!/small_log/tsne.png
