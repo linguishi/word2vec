@@ -1,4 +1,4 @@
-## word2vec 实现
+## word2vec Implementation
 
 #### Corpus
 `text8.small`
@@ -9,8 +9,9 @@ $ cat text8.small | tr ' ' '\n' | sort | uniq | wc -w
 output : 70985
 ```
 
-`text8.small` 
+`text8`
 ```sh
+# need manually download 
 $ wget http://mattmahoney.net/dc/text8.zip
 $ wc -w text8
 output : 17005207
@@ -18,7 +19,7 @@ $ cat text8 | tr ' ' '\n' | sort | uniq | wc -w
 output : 253854
 ```
 
-#### How to run
+#### How to Run
 
 ```sh
 python word2vec.py --log_path=small_log --corpus_file=text8.small --voc_size=30000
@@ -38,7 +39,7 @@ learning_rate = FLAGS.learning_rate
 
 ```
 
-### some results
+#### Some Results
 ```
 Nearest to which: that, this, also, but, it, wct, roshan, and,
 Nearest to who: he, they, originally, which, chromatic, also, gibb, she,
@@ -57,8 +58,13 @@ Nearest to state: dasyprocta, operatorname, vma, deregulation, wct, asymmetric, 
 Nearest to during: in, abet, by, when, after, iit, addington, dioxin,
 Nearest to on: in, through, cebus, tano, numa, ursus, manure, against,
 ```
+Visualization in 2D
+![word to vec visualize](https://raw.githubusercontent.com/linguishi/word2vec/master/log/tsne.png)
 
-### reference
+#### TODO
+Add Evaluation methods such as **King - Man + Women = Queue**
+
+#### Reference
 
 [1] Learn Word2Vec by implementing it in tensorflow https://towardsdatascience.com/learn-word2vec-by-implementing-it-in-tensorflow-45641adaf2ac
 

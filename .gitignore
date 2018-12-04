@@ -1,5 +1,6 @@
 text8
 text8.zip
+small_text
 *.pyc
 .vscode
 /log/*
